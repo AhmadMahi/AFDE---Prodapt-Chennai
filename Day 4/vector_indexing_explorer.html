@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How Vector Indexes Work — RAG Visual Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/dist/tabler-icons.min.css" rel="stylesheet" />
+<style>
+:root {
+  --bg: #fbfaf6;
+  --bg-elev: #ffffff;
+  --bg-soft: #f3eee1;
+  --text: #1c1b1a;
+  --text-2: #5f5e5a;
+  --text-3: #888780;
+  --border: rgba(0,0,0,0.08);
+  --border-2: rgba(0,0,0,0.14);
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 4px 16px rgba(28,27,26,0.06), 0 1px 3px rgba(28,27,26,0.04);
+  --shadow-lg: 0 10px 40px rgba(28,27,26,0.10), 0 2px 8px rgba(28,27,26,0.05);
+
+  --purple-50:#EEEDFE; --purple-200:#AFA9EC; --purple-400:#7F77DD; --purple-600:#534AB7; --purple-800:#3C3489;
+  --teal-50:#E1F5EE;   --teal-200:#5DCAA5;   --teal-400:#1D9E75;   --teal-600:#0F6E56;   --teal-800:#085041;
+  --coral-50:#FAECE7;  --coral-200:#F0997B;  --coral-400:#D85A30;  --coral-600:#993C1D;  --coral-800:#712B13;
+  --pink-50:#FBEAF0;   --pink-200:#ED93B1;   --pink-400:#D4537E;   --pink-600:#993556;   --pink-800:#72243E;
+  --gray-50:#F1EFE8;   --gray-200:#B4B2A9;   --gray-400:#888780;   --gray-600:#5F5E5A;   --gray-800:#2C2C2A;
+  --red-600:#A32D2D;   --red-800:#791F1F;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15140f;
+    --bg-elev: #1d1c17;
+    --bg-soft: #252319;
+    --text: #f5f1e8;
+    --text-2: #b4b2a9;
+    --text-3: #7f7d75;
+    --border: rgba(255,255,255,0.10);
+    --border-2: rgba(255,255,255,0.18);
+    --shadow: 0 4px 16px rgba(0,0,0,0.40), 0 1px 3px rgba(0,0,0,0.20);
+    --shadow-lg: 0 10px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.30);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+body { min-height: 100vh; line-height: 1.6; }
+
+.container { max-width: 1080px; margin: 0 auto; padding: 32px 20px 80px; }
+
+/* HERO */
+.hero {
+  background: linear-gradient(135deg, rgba(127,119,221,0.14), rgba(29,158,117,0.10) 50%, rgba(216,90,48,0.10));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 28px 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -100px; right: -80px;
+  width: 280px; height: 280px;
+  background: radial-gradient(circle, rgba(127,119,221,0.18), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--purple-600);
+  background: var(--purple-50);
+  padding: 5px 11px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  .hero-eyebrow { background: rgba(127,119,221,0.18); color: var(--purple-200); }
+}
+.hero h1 {
+  font-size: clamp(26px, 4vw, 38px);
+  font-weight: 600;
+  margin: 0 0 10px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+.hero p {
+  font-size: 15px;
+  color: var(--text-2);
+  margin: 0;
+  max-width: 640px;
+}
+
+/* METHOD TABS */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tab-btn {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  box-shadow: var(--shadow-sm);
+}
+.tab-btn i { font-size: 17px; }
+.tab-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.tab-btn.active { font-weight: 500; }
+.tab-btn.active[data-color="gray"]   { background: var(--gray-50);   color: var(--gray-800);   border-color: var(--gray-400);   box-shadow: 0 0 0 3px rgba(95,94,90,0.15); }
+.tab-btn.active[data-color="purple"] { background: var(--purple-50); color: var(--purple-800); border-color: var(--purple-400); box-shadow: 0 0 0 3px rgba(127,119,221,0.22); }
+.tab-btn.active[data-color="coral"]  { background: var(--coral-50);  color: var(--coral-800);  border-color: var(--coral-400);  box-shadow: 0 0 0 3px rgba(216,90,48,0.20); }
+.tab-btn.active[data-color="pink"]   { background: var(--pink-50);   color: var(--pink-800);   border-color: var(--pink-400);   box-shadow: 0 0 0 3px rgba(212,83,126,0.20); }
+.tab-btn.active[data-color="teal"]   { background: var(--teal-50);   color: var(--teal-800);   border-color: var(--teal-400);   box-shadow: 0 0 0 3px rgba(29,158,117,0.20); }
+
+@media (prefers-color-scheme: dark) {
+  .tab-btn.active[data-color="gray"]   { background: rgba(95,94,90,0.20);   color: var(--gray-50); }
+  .tab-btn.active[data-color="purple"] { background: rgba(127,119,221,0.20); color: var(--purple-50); }
+  .tab-btn.active[data-color="coral"]  { background: rgba(216,90,48,0.20);   color: var(--coral-50); }
+  .tab-btn.active[data-color="pink"]   { background: rgba(212,83,126,0.20);  color: var(--pink-50); }
+  .tab-btn.active[data-color="teal"]   { background: rgba(29,158,117,0.20);  color: var(--teal-50); }
+}
+
+/* METHOD HEADER */
+.method-header {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--gray-400);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.25s ease;
+}
+.method-header-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#method-name { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+#method-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--gray-50);
+  color: var(--gray-800);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#method-desc { font-size: 14px; color: var(--text-2); margin-top: 6px; }
+
+/* STAT GRID */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+@media (max-width: 560px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.stat-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-sm);
+}
+.stat-label {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+.stat-label i { font-size: 13px; }
+.stat-value { font-size: 16px; font-weight: 600; margin-top: 2px; color: var(--text); letter-spacing: -0.01em; }
+
+/* CANVAS */
+.canvas-wrap {
+  background: linear-gradient(180deg, #fdfcf9 0%, #f3eee1 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+@media (prefers-color-scheme: dark) {
+  .canvas-wrap { background: linear-gradient(180deg, #1d1c17 0%, #25231c 100%); }
+}
+.canvas-tag {
+  position: absolute;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.92);
+  color: var(--gray-600);
+  z-index: 2;
+  backdrop-filter: blur(4px);
+}
+@media (prefers-color-scheme: dark) {
+  .canvas-tag { background: rgba(29,28,23,0.92); color: var(--text-2); }
+}
+.canvas-tag.tl { top: 12px; left: 14px; }
+.canvas-tag.tr { top: 12px; right: 14px; }
+.canvas-tag i { font-size: 12px; vertical-align: -2px; }
+svg#canvas { width: 100%; height: clamp(280px, 50vw, 380px); display: block; }
+
+/* CONTROLS */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.step-btn {
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s;
+  box-shadow: var(--shadow-sm);
+}
+.step-btn:hover:not(:disabled) { background: var(--bg-soft); transform: translateY(-1px); }
+.step-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.step-btn i { font-size: 15px; }
+.step-btn.primary {
+  background: linear-gradient(135deg, #534AB7, #3C3489);
+  color: #fff;
+  border-color: var(--purple-800);
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(60,52,137,0.25);
+}
+.step-btn.primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(60,52,137,0.32); }
+.step-dots { display: flex; gap: 4px; margin-left: 4px; }
+.step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-200); transition: all 0.25s; }
+.step-dot.active { width: 26px; border-radius: 999px; }
+
+.slider-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  box-shadow: var(--shadow-sm);
+}
+.slider-group label { font-size: 12px; color: var(--text-3); font-weight: 500; }
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 110px;
+  height: 4px;
+  background: var(--gray-200);
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--purple-600);
+  border: 2px solid var(--bg-elev);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--purple-600);
+  border: 2px solid var(--bg-elev);
+  border-radius: 50%;
+  cursor: pointer;
+}
+#corpus-out { font-size: 13px; font-weight: 600; min-width: 32px; text-align: right; color: var(--text); }
+
+/* STEP CARD */
+.step-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--gray-400);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.25s ease;
+}
+.step-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+#step-num-pill {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--gray-50);
+  color: var(--gray-800);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#step-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+#step-body { font-size: 14px; line-height: 1.7; color: var(--text-2); margin: 0 0 14px; }
+.math-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.math-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.math-label i { font-size: 13px; }
+#step-formula { color: var(--gray-800); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 1.7; }
+
+@media (prefers-color-scheme: dark) {
+  .math-box { background: rgba(255,255,255,0.04); }
+}
+
+/* GLOSSARY */
+.glossary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.gloss-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.18s;
+}
+.gloss-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.gloss-title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.gloss-title i { font-size: 15px; color: var(--purple-600); }
+.gloss-body { font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
+
+/* FOOTER NOTE */
+.footnote {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 480px) {
+  .hero { padding: 22px 18px 18px; }
+  .hero h1 { font-size: 22px; }
+  .controls { gap: 6px; }
+  .step-btn { padding: 8px 11px; font-size: 12.5px; }
+  .slider-group { margin-left: 0; width: 100%; justify-content: space-between; }
+  input[type="range"] { flex: 1; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-eyebrow"><i class="ti ti-binary-tree"></i> Vector indexing for RAG</div>
+    <h1>How vector indexes really work</h1>
+    <p>Pick a method below, then step through it. Each step has a picture, a plain explanation, and one tiny formula. Drag the slider to grow the corpus, or click the canvas to move the query.</p>
+  </div>
+
+  <!-- METHOD TABS -->
+  <div class="tabs">
+    <button class="tab-btn" data-idx="flat"  data-color="gray"><i class="ti ti-grid-dots"></i>Flat</button>
+    <button class="tab-btn" data-idx="ivf"   data-color="purple"><i class="ti ti-aperture"></i>IVF</button>
+    <button class="tab-btn" data-idx="pq"    data-color="coral"><i class="ti ti-package"></i>PQ</button>
+    <button class="tab-btn" data-idx="ivfpq" data-color="pink"><i class="ti ti-stack-2"></i>IVF + PQ</button>
+    <button class="tab-btn" data-idx="hnsw"  data-color="teal"><i class="ti ti-share-3"></i>HNSW</button>
+  </div>
+
+  <!-- METHOD HEADER -->
+  <div class="method-header" id="method-header">
+    <div class="method-header-row">
+      <span id="method-name">Flat (brute-force)</span>
+      <span id="method-badge">exact</span>
+    </div>
+    <div id="method-desc">Compare the query to every single vector. Exact answer, slow at scale.</div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-label"><i class="ti ti-hammer"></i>Build</div><div id="stat-build" class="stat-value">Lowest</div></div>
+    <div class="stat-card"><div class="stat-label"><i class="ti ti-bolt"></i>Speed</div><div id="stat-query" class="stat-value">Slow</div></div>
+    <div class="stat-card"><div class="stat-label"><i class="ti ti-database"></i>Memory</div><div id="stat-memory" class="stat-value">High</div></div>
+    <div class="stat-card"><div class="stat-label"><i class="ti ti-target"></i>Recall</div><div id="stat-recall" class="stat-value">100%</div></div>
+  </div>
+
+  <!-- CANVAS -->
+  <div class="canvas-wrap">
+    <div class="canvas-tag tl"><i class="ti ti-grid-pattern"></i> vector space</div>
+    <div class="canvas-tag tr"><i class="ti ti-calculator"></i> <span id="ops-counter">0</span> checks</div>
+    <svg id="canvas" viewBox="0 0 660 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vector search visualization"></svg>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button id="prev-btn" class="step-btn" disabled><i class="ti ti-chevron-left"></i>Back</button>
+    <button id="next-btn" class="step-btn primary">Next step<i class="ti ti-chevron-right"></i></button>
+    <button id="auto-btn" class="step-btn"><i class="ti ti-player-play"></i>Auto</button>
+    <div id="step-indicator" class="step-dots"></div>
+    <div class="slider-group">
+      <label>N =</label>
+      <input type="range" id="corpus-slider" min="50" max="220" step="10" value="140" />
+      <span id="corpus-out">140</span>
+    </div>
+  </div>
+
+  <!-- STEP CARD -->
+  <div class="step-card" id="step-card">
+    <div class="step-header">
+      <span id="step-num-pill">Step 1 of 3</span>
+      <span id="step-title">Look at the corpus</span>
+    </div>
+    <div id="step-body">N vectors sit in the search space. The red dot is your query. Right now we know nothing about them.</div>
+    <div class="math-box" id="step-math">
+      <div class="math-label"><i class="ti ti-math-function"></i> tiny math</div>
+      <div id="step-formula">A vector is a list of numbers. Closer vectors = more similar meaning.</div>
+    </div>
+  </div>
+
+  <!-- GLOSSARY -->
+  <div class="glossary">
+    <div class="gloss-card"><div class="gloss-title"><i class="ti ti-vector-bezier-2"></i>Vector</div><div class="gloss-body">A list of numbers (e.g. 1,536 of them) that represents the meaning of a text chunk.</div></div>
+    <div class="gloss-card"><div class="gloss-title"><i class="ti ti-ruler-measure"></i>Distance</div><div class="gloss-body">How different two vectors are. Closer = more similar in meaning.</div></div>
+    <div class="gloss-card"><div class="gloss-title"><i class="ti ti-target-arrow"></i>Top-k</div><div class="gloss-body">The k vectors closest to the query. Typically k = 5 or 10.</div></div>
+    <div class="gloss-card"><div class="gloss-title"><i class="ti ti-percentage"></i>Recall</div><div class="gloss-body">Of the true top-k, how many did the index actually find? 100% = perfect.</div></div>
+  </div>
+
+  <div class="footnote">
+    Built for visual learning. Click any point on the canvas to move the query.
+  </div>
+</div>
+
+<script>
+(function() {
+  const svg = document.getElementById('canvas');
+  const W = 660, H = 360, PAD = 28;
+  let N = 140;
+  let points = [];
+  let queryPt = { x: W * 0.5, y: H * 0.45 };
+  let currentIdx = 'flat';
+  let stepIdx = 0;
+  let autoplay = null;
+
+  const PALETTE = {
+    gray:   { 50:'#F1EFE8', 200:'#B4B2A9', 400:'#888780', 600:'#5F5E5A', 800:'#2C2C2A', badge:'exact' },
+    purple: { 50:'#EEEDFE', 200:'#AFA9EC', 400:'#7F77DD', 600:'#534AB7', 800:'#3C3489', badge:'approximate' },
+    coral:  { 50:'#FAECE7', 200:'#F0997B', 400:'#D85A30', 600:'#993C1D', 800:'#712B13', badge:'compressed' },
+    pink:   { 50:'#FBEAF0', 200:'#ED93B1', 400:'#D4537E', 600:'#993556', 800:'#72243E', badge:'compressed + fast' },
+    teal:   { 50:'#E1F5EE', 200:'#5DCAA5', 400:'#1D9E75', 600:'#0F6E56', 800:'#085041', badge:'graph-based' }
+  };
+
+  const INFO = {
+    flat:  { name:'Flat (brute-force)',        color:'gray',   desc:'Compare the query to every single vector. Exact answer, slow at scale.', build:'Lowest', query:'Slow', memory:'High', recall:'100%' },
+    ivf:   { name:'IVF (inverted file)',       color:'purple', desc:'Group vectors into clusters. Only search the clusters closest to the query.', build:'Low', query:'Fast', memory:'High', recall:'High' },
+    pq:    { name:'PQ (product quantization)', color:'coral',  desc:'Compress each vector into a few bytes. Big memory savings, small precision loss.', build:'Medium', query:'Medium', memory:'Very low', recall:'Medium' },
+    ivfpq: { name:'IVF + PQ',                  color:'pink',   desc:'Narrow the search with clusters, then store vectors in compressed form. The classic billion-scale recipe.', build:'Medium', query:'Fast', memory:'Very low', recall:'Medium-High' },
+    hnsw:  { name:'HNSW (graph-based)',        color:'teal',   desc:'A multi-layer graph. The query hops through it to the answer in just a few moves.', build:'High', query:'Fastest', memory:'High', recall:'Very high' }
+  };
+
+  function nlistOf(n) { return Math.max(2, Math.round(Math.sqrt(n))); }
+
+  const STEPS = {
+    flat: [
+      {
+        title: 'Look at the corpus',
+        body:  'N vectors sit in the search space. The red dot is your query. Right now we know nothing about how they relate.',
+        formula: 'A vector is a list of numbers (1,536 for text-embedding-3-small). Two vectors close together = similar meaning.',
+        action: () => drawBase()
+      },
+      {
+        title: 'Measure distance to every vector',
+        body:  'For each of the N vectors, calculate how far it is from the query. Exact, but linear work — N comparisons.',
+        formulaFn: () => 'distance(q, v) = √ Σ (qᵢ − vᵢ)²    →    ' + N + ' distances total',
+        action: async () => {
+          drawBase();
+          const order = points.map((_, i) => i);
+          const batch = Math.max(1, Math.floor(order.length / 40));
+          let ops = 0;
+          for (let s = 0; s < order.length; s += batch) {
+            order.slice(s, s + batch).forEach(i => {
+              const d = svg.querySelector(`[data-i="${i}"]`);
+              if (d) { d.setAttribute('fill', '#534AB7'); d.setAttribute('opacity', '0.75'); }
+              const line = el('line', { x1: queryPt.x, y1: queryPt.y, x2: points[i].x, y2: points[i].y, stroke: '#888780', 'stroke-width': 0.3, opacity: 0.22 });
+              svg.insertBefore(line, svg.firstChild.nextSibling);
+            });
+            ops += batch;
+            setOps(ops);
+            await pause(20);
+          }
+        }
+      },
+      {
+        title: 'Pick the top-5 nearest',
+        body:  'Sort by distance, return the 5 smallest. These are the chunks you would feed to the LLM. Cost grows linearly with the corpus.',
+        formula: 'top-5 = the 5 vectors with the smallest distance.    Cost: O(N) per query.',
+        action: () => {
+          drawBase();
+          points.forEach(p => {
+            const line = el('line', { x1: queryPt.x, y1: queryPt.y, x2: p.x, y2: p.y, stroke: '#888780', 'stroke-width': 0.3, opacity: 0.12 });
+            svg.insertBefore(line, svg.firstChild.nextSibling);
+          });
+          setOps(N);
+          drawTopK(topK(5));
+        }
+      }
+    ],
+
+    ivf: [
+      {
+        title: 'Partition the space into clusters',
+        body:  'During indexing, k-means groups vectors into a few cells. Each vector belongs to its nearest cluster centroid (the bright dots).',
+        formula: 'nlist = number of clusters (often ≈ √N). Every vector joins its nearest centroid.',
+        action: () => { drawBase({ useClusterColor: true }); drawCentroids(); }
+      },
+      {
+        title: 'Find the clusters nearest to the query',
+        body:  'Do not scan all N vectors. First find which centroids are closest to the query — only a handful of comparisons.',
+        formulaFn: () => 'Compare query against nlist ≈ √' + N + ' = ' + nlistOf(N) + ' centroids.  Way fewer than ' + N + '.',
+        action: () => {
+          drawBase({ useClusterColor: true, dimAll: true });
+          const cs = drawCentroids();
+          const near = cs.map(c => ({ c, d: dist(c, queryPt) })).sort((a, b) => a.d - b.d).slice(0, 2);
+          near.forEach(n => {
+            svg.appendChild(el('line', { x1: queryPt.x, y1: queryPt.y, x2: n.c.x, y2: n.c.y, stroke: clusterColor(n.c.label), 'stroke-width': 2.5, opacity: 0.85 }));
+            svg.appendChild(el('circle', { cx: n.c.x, cy: n.c.y, r: 55, fill: 'none', stroke: clusterColor(n.c.label), 'stroke-width': 1.5, 'stroke-dasharray': '5 4', opacity: 0.7 }));
+          });
+          setOps(cs.length);
+        }
+      },
+      {
+        title: 'Search inside those clusters only',
+        body:  'Compare the query against vectors inside the chosen clusters — a small fraction of N. The top-5 comes from this much smaller pool.',
+        formulaFn: () => {
+          const nl = nlistOf(N);
+          const visited = nl + Math.round(N / nl * 2);
+          return 'Cost ≈ nlist + (N / nlist) × nprobe.    For N=' + N + ', nlist=' + nl + ', nprobe=2  →  ' + visited + ' checks vs. ' + N + '.';
+        },
+        action: () => {
+          drawBase({ useClusterColor: true, dimAll: true });
+          const cs = drawCentroids();
+          const near = cs.map(c => ({ c, d: dist(c, queryPt) })).sort((a, b) => a.d - b.d).slice(0, 2);
+          const cands = [];
+          near.forEach(n => {
+            svg.appendChild(el('circle', { cx: n.c.x, cy: n.c.y, r: 55, fill: 'none', stroke: clusterColor(n.c.label), 'stroke-width': 1.5, 'stroke-dasharray': '5 4', opacity: 0.7 }));
+            n.c.ids.forEach(i => cands.push(i));
+          });
+          cands.forEach(i => {
+            const d = svg.querySelector(`[data-i="${i}"]`);
+            if (d) { d.setAttribute('opacity', '0.9'); d.setAttribute('r', '4.3'); }
+          });
+          drawTopK(cands.map(i => ({ i, d: dist(points[i], queryPt) })).sort((a, b) => a.d - b.d).slice(0, 5).map(x => x.i));
+          setOps(cs.length + cands.length);
+        }
+      }
+    ],
+
+    pq: [
+      {
+        title: 'Each vector is huge — 1,536 numbers',
+        body:  'Real embeddings have 1,536 dimensions. Storing millions of them is expensive. We need to shrink them.',
+        formula: '1 vector = 1,536 floats × 4 bytes = 6,144 bytes.    10 million vectors ≈ 60 GB of memory.',
+        action: () => drawBase()
+      },
+      {
+        title: 'Split each vector into chunks, replace with a code',
+        body:  'Cut every vector into M sub-vectors. For each sub-vector, find the closest entry in a small codebook. Store the code (1 byte), not the floats.',
+        formula: 'M = 8 sub-vectors × 1 byte each = 8 bytes per vector.    That is 768× smaller than the original 6,144 bytes.',
+        action: () => {
+          drawBase({ dimAll: true });
+          const codes = ['A2','B7','4F','C1','9E','0D','83','E5','7B','3A'];
+          points.forEach((p, i) => {
+            if (i % 2 !== 0) return;
+            svg.appendChild(el('rect', { x: p.x + 6, y: p.y - 8, width: 24, height: 12, rx: 3, fill: '#FAECE7', stroke: '#D85A30', 'stroke-width': 0.7 }));
+            const t = el('text', { x: p.x + 18, y: p.y + 1, 'font-size': '8', 'text-anchor': 'middle', fill: '#712B13', 'font-family': 'JetBrains Mono, monospace', 'font-weight': '500' });
+            t.textContent = codes[i % codes.length];
+            svg.appendChild(t);
+          });
+        }
+      },
+      {
+        title: 'Compare query against codes (fast, approximate)',
+        body:  'Instead of real distance, look up an approximate distance from a tiny precomputed table. Very fast — top-5 may have small errors.',
+        formula: 'Approximate distance: sum of M table lookups.    Trade: ~99% of the speed/memory wins, ~90% of the accuracy.',
+        action: () => {
+          drawBase({ dimAll: true });
+          const codes = ['A2','B7','4F','C1','9E','0D','83','E5'];
+          points.forEach((p, i) => {
+            if (i % 2 !== 0) return;
+            svg.appendChild(el('rect', { x: p.x + 6, y: p.y - 8, width: 24, height: 12, rx: 3, fill: '#FAECE7', stroke: '#D85A30', 'stroke-width': 0.7 }));
+            const t = el('text', { x: p.x + 18, y: p.y + 1, 'font-size': '8', 'text-anchor': 'middle', fill: '#712B13', 'font-family': 'JetBrains Mono, monospace', 'font-weight': '500' });
+            t.textContent = codes[i % codes.length];
+            svg.appendChild(t);
+          });
+          const r = seed(7);
+          drawTopK(points.map((p, i) => ({ i, d: dist(p, queryPt) + (r() - 0.5) * 22 })).sort((a, b) => a.d - b.d).slice(0, 5).map(s => s.i));
+          setOps(N);
+        }
+      }
+    ],
+
+    ivfpq: [
+      {
+        title: 'Combine the two ideas',
+        body:  'IVF tells us which neighborhood to look in. PQ shrinks the vectors so each neighborhood is cheap to store and scan.',
+        formula: 'IVF: skip most of the corpus.    PQ: shrink what is left.    Together: fast queries AND tiny memory.',
+        action: () => { drawBase({ useClusterColor: true }); drawCentroids(); }
+      },
+      {
+        title: 'Pick the nearest clusters (IVF part)',
+        body:  'Just like plain IVF: find the few centroids closest to the query. Ignore the rest of the space.',
+        formulaFn: () => 'Visit only 2 of the ' + nlistOf(N) + ' clusters → ~' + Math.round(N / nlistOf(N) * 2) + ' vectors instead of ' + N + '.',
+        action: () => {
+          drawBase({ useClusterColor: true, dimAll: true });
+          const cs = drawCentroids();
+          const near = cs.map(c => ({ c, d: dist(c, queryPt) })).sort((a, b) => a.d - b.d).slice(0, 2);
+          near.forEach(n => {
+            svg.appendChild(el('line', { x1: queryPt.x, y1: queryPt.y, x2: n.c.x, y2: n.c.y, stroke: clusterColor(n.c.label), 'stroke-width': 2.5, opacity: 0.85 }));
+            svg.appendChild(el('circle', { cx: n.c.x, cy: n.c.y, r: 55, fill: 'none', stroke: clusterColor(n.c.label), 'stroke-width': 1.5, 'stroke-dasharray': '5 4', opacity: 0.7 }));
+          });
+          setOps(cs.length);
+        }
+      },
+      {
+        title: 'Inside those clusters, vectors are PQ codes',
+        body:  'The candidates inside the chosen clusters are tiny PQ codes, not full vectors. Distance lookups are extremely fast.',
+        formula: 'Final cost: nlist + (N/nlist × nprobe) × M lookups.    Used by FAISS for billion-scale ANN in production.',
+        action: () => {
+          drawBase({ useClusterColor: true, dimAll: true });
+          const cs = drawCentroids();
+          const near = cs.map(c => ({ c, d: dist(c, queryPt) })).sort((a, b) => a.d - b.d).slice(0, 2);
+          near.forEach(n => svg.appendChild(el('circle', { cx: n.c.x, cy: n.c.y, r: 55, fill: 'none', stroke: clusterColor(n.c.label), 'stroke-width': 1.5, 'stroke-dasharray': '5 4', opacity: 0.7 })));
+          const cands = [];
+          near.forEach(n => n.c.ids.forEach(i => cands.push(i)));
+          const codes = ['A2','B7','4F','C1','9E','0D','83','E5'];
+          cands.slice(0, 26).forEach(i => {
+            const p = points[i];
+            svg.appendChild(el('rect', { x: p.x + 6, y: p.y - 8, width: 24, height: 12, rx: 3, fill: '#FBEAF0', stroke: '#D4537E', 'stroke-width': 0.7 }));
+            const t = el('text', { x: p.x + 18, y: p.y + 1, 'font-size': '8', 'text-anchor': 'middle', fill: '#72243E', 'font-family': 'JetBrains Mono, monospace', 'font-weight': '500' });
+            t.textContent = codes[i % codes.length];
+            svg.appendChild(t);
+          });
+          cands.forEach(i => {
+            const d = svg.querySelector(`[data-i="${i}"]`);
+            if (d) { d.setAttribute('opacity', '0.9'); d.setAttribute('r', '4.3'); }
+          });
+          const r = seed(11);
+          drawTopK(cands.map(i => ({ i, d: dist(points[i], queryPt) + (r() - 0.5) * 14 })).sort((a, b) => a.d - b.d).slice(0, 5).map(s => s.i));
+          setOps(cs.length + cands.length);
+        }
+      }
+    ],
+
+    hnsw: [
+      {
+        title: 'Build a graph of neighbors',
+        body:  'During indexing, each vector links to its handful of nearest neighbors. The result is a small-world graph — any two points are connected by short paths.',
+        formula: 'Each node has up to M edges to nearby nodes.    M = 16 or 32 in practice.',
+        action: () => { drawBase({ dimAll: true }); drawHnswGraph(); }
+      },
+      {
+        title: 'Add a sparse top layer',
+        body:  'A small fraction of vectors are also placed on a "highway" layer. These let the query jump across the space quickly.',
+        formula: 'Probability of being on a higher layer drops exponentially.    Top layer = sparse expressway. Bottom = local streets.',
+        action: () => { drawBase({ dimAll: true }); drawHnswGraph(true); }
+      },
+      {
+        title: 'Greedy walk: hop toward the query',
+        body:  'Start on the top layer. Look at neighbors, jump to whichever is closer to the query. Drop down a layer and repeat. Just a few hops total.',
+        formulaFn: () => 'Cost ≈ log₂(N) hops.    For N=' + N + ' that is roughly ' + Math.round(Math.log2(N)) + ' hops, not ' + N + '.',
+        action: () => {
+          drawBase({ dimAll: true });
+          const { edges, topLayer } = drawHnswGraph(true);
+          let cur = Array.from(topLayer)[0];
+          let best = dist(points[cur], queryPt);
+          Array.from(topLayer).forEach(i => { const d = dist(points[i], queryPt); if (d < best) { best = d; cur = i; } });
+          const path = [cur];
+          let improved = true, safety = 0;
+          while (improved && safety < 30) {
+            safety++; improved = false;
+            const neigh = edges.filter(e => e.a === cur).map(e => e.b);
+            for (const nb of neigh) {
+              const d = dist(points[nb], queryPt);
+              if (d < best - 0.5) { best = d; cur = nb; path.push(nb); improved = true; break; }
+            }
+          }
+          for (let i = 0; i < path.length - 1; i++) {
+            const a = points[path[i]], b = points[path[i+1]];
+            svg.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#0F6E56', 'stroke-width': 2.8, opacity: 0.95, 'stroke-linecap': 'round' }));
+            const dot = svg.querySelector(`[data-i="${path[i+1]}"]`);
+            if (dot) { dot.setAttribute('fill', '#0F6E56'); dot.setAttribute('r', '5.5'); dot.setAttribute('opacity', '1'); dot.setAttribute('stroke', '#fff'); dot.setAttribute('stroke-width', '1.5'); }
+          }
+          const refine = edges.filter(e => e.a === cur).map(e => e.b).concat([cur]).slice(0, 11);
+          refine.forEach(i => { const d = svg.querySelector(`[data-i="${i}"]`); if (d) d.setAttribute('opacity', '0.95'); });
+          drawTopK(refine.map(i => ({ i, d: dist(points[i], queryPt) })).sort((a, b) => a.d - b.d).slice(0, 5).map(s => s.i));
+          setOps(path.length + refine.length);
+        }
+      }
+    ]
+  };
+
+  // ===== helpers =====
+  function seed(s) { return function() { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
+  let rand = seed(42);
+
+  function generatePoints(n) {
+    rand = seed(42);
+    const pts = [];
+    const cs = [
+      { cx: W*0.22, cy: H*0.28 }, { cx: W*0.72, cy: H*0.22 },
+      { cx: W*0.28, cy: H*0.72 }, { cx: W*0.70, cy: H*0.70 },
+      { cx: W*0.50, cy: H*0.45 }
+    ];
+    for (let i = 0; i < n; i++) {
+      const c = cs[i % cs.length];
+      const r = 35 + rand() * 55;
+      const a = rand() * Math.PI * 2;
+      pts.push({
+        x: clamp(c.cx + Math.cos(a) * r * rand(), PAD, W - PAD),
+        y: clamp(c.cy + Math.sin(a) * r * rand(), PAD + 20, H - PAD),
+        cluster: i % cs.length
+      });
+    }
+    return pts;
+  }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function el(tag, attrs) {
+    const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function clusterColor(c) { return ['#7F77DD', '#1D9E75', '#D85A30', '#378ADD', '#EF9F27'][c]; }
+  function topK(k) { return points.map((p, i) => ({ i, d: dist(p, queryPt) })).sort((a, b) => a.d - b.d).slice(0, k).map(s => s.i); }
+
+  function drawBase(opts) {
+    opts = opts || {};
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    for (let x = 0; x <= W; x += 60) svg.appendChild(el('line', { x1: x, y1: 0, x2: x, y2: H, stroke: '#D3D1C7', 'stroke-width': 0.3, opacity: 0.35 }));
+    for (let y = 0; y <= H; y += 60) svg.appendChild(el('line', { x1: 0, y1: y, x2: W, y2: y, stroke: '#D3D1C7', 'stroke-width': 0.3, opacity: 0.35 }));
+    svg.appendChild(el('circle', { cx: queryPt.x, cy: queryPt.y, r: 90, fill: 'rgba(163,45,45,0.04)', stroke: 'rgba(163,45,45,0.15)', 'stroke-width': 0.6, 'stroke-dasharray': '3 4' }));
+    points.forEach((p, i) => {
+      svg.appendChild(el('circle', {
+        cx: p.x, cy: p.y, r: 3.5,
+        fill: opts.useClusterColor ? clusterColor(p.cluster) : '#888780',
+        opacity: opts.dimAll ? 0.20 : 0.55,
+        'data-i': i
+      }));
+    });
+    svg.appendChild(el('circle', { cx: queryPt.x, cy: queryPt.y, r: 16, fill: 'rgba(163,45,45,0.18)' }));
+    svg.appendChild(el('circle', { cx: queryPt.x, cy: queryPt.y, r: 8.5, fill: '#A32D2D', stroke: '#fff', 'stroke-width': 2.5 }));
+    svg.appendChild(el('circle', { cx: queryPt.x, cy: queryPt.y, r: 3, fill: '#fff' }));
+    const lbl = el('text', { x: queryPt.x + 17, y: queryPt.y + 4, 'font-size': '12', 'font-weight': '500', fill: '#791F1F' });
+    lbl.textContent = 'query';
+    svg.appendChild(lbl);
+  }
+
+  function drawCentroids() {
+    const groups = {};
+    points.forEach((p, i) => {
+      if (!groups[p.cluster]) groups[p.cluster] = { xs: 0, ys: 0, n: 0, ids: [] };
+      groups[p.cluster].xs += p.x; groups[p.cluster].ys += p.y;
+      groups[p.cluster].n++; groups[p.cluster].ids.push(i);
+    });
+    const list = Object.keys(groups).map(k => ({
+      x: groups[k].xs / groups[k].n, y: groups[k].ys / groups[k].n,
+      ids: groups[k].ids, label: +k
+    }));
+    list.forEach(c => {
+      svg.appendChild(el('circle', { cx: c.x, cy: c.y, r: 16, fill: 'none', stroke: clusterColor(c.label), 'stroke-width': 1, opacity: 0.5 }));
+      svg.appendChild(el('circle', { cx: c.x, cy: c.y, r: 11, fill: clusterColor(c.label), opacity: 0.95, stroke: '#fff', 'stroke-width': 2.5 }));
+      const t = el('text', { x: c.x, y: c.y + 3.5, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '500', fill: '#fff' });
+      t.textContent = 'C' + (c.label + 1);
+      svg.appendChild(t);
+    });
+    return list;
+  }
+
+  function drawTopK(ids) {
+    ids.forEach(i => {
+      const p = points[i];
+      svg.appendChild(el('line', { x1: queryPt.x, y1: queryPt.y, x2: p.x, y2: p.y, stroke: '#A32D2D', 'stroke-width': 1.5, opacity: 0.6, 'stroke-linecap': 'round' }));
+      svg.appendChild(el('circle', { cx: p.x, cy: p.y, r: 9, fill: 'none', stroke: '#A32D2D', 'stroke-width': 1.5, opacity: 0.4 }));
+      const dot = svg.querySelector(`[data-i="${i}"]`);
+      if (dot) { dot.setAttribute('fill', '#A32D2D'); dot.setAttribute('r', '5.5'); dot.setAttribute('opacity', '1'); dot.setAttribute('stroke', '#fff'); dot.setAttribute('stroke-width', '1.5'); }
+    });
+  }
+
+  function drawHnswGraph(showTop) {
+    const kEdges = 4;
+    const edges = [];
+    for (let i = 0; i < points.length; i++) {
+      const ns = points.map((p, j) => ({ j, d: dist(p, points[i]) })).filter(o => o.j !== i).sort((a, b) => a.d - b.d).slice(0, kEdges);
+      ns.forEach(n => edges.push({ a: i, b: n.j }));
+    }
+    const topLayer = new Set();
+    for (let i = 0; i < points.length; i += 7) topLayer.add(i);
+    edges.forEach(e => {
+      const a = points[e.a], b = points[e.b];
+      svg.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#5DCAA5', 'stroke-width': 0.5, opacity: 0.35 }));
+    });
+    if (showTop) {
+      const top = Array.from(topLayer);
+      for (let i = 0; i < top.length; i++) {
+        for (let j = i + 1; j < top.length; j++) {
+          if (dist(points[top[i]], points[top[j]]) < 180) {
+            svg.appendChild(el('line', { x1: points[top[i]].x, y1: points[top[i]].y, x2: points[top[j]].x, y2: points[top[j]].y, stroke: '#0F6E56', 'stroke-width': 1.2, opacity: 0.55, 'stroke-dasharray': '4 3' }));
+          }
+        }
+      }
+      topLayer.forEach(i => {
+        const d = svg.querySelector(`[data-i="${i}"]`);
+        if (d) { d.setAttribute('fill', '#1D9E75'); d.setAttribute('opacity', '0.95'); d.setAttribute('r', '5.5'); d.setAttribute('stroke', '#fff'); d.setAttribute('stroke-width', '1.5'); }
+      });
+    }
+    return { edges, topLayer };
+  }
+
+  function setOps(n) { document.getElementById('ops-counter').textContent = Math.round(n).toLocaleString(); }
+
+  function updateStepIndicator() {
+    const steps = STEPS[currentIdx];
+    const c = INFO[currentIdx].color;
+    const dotColor = PALETTE[c][400];
+    const wrap = document.getElementById('step-indicator');
+    wrap.innerHTML = '';
+    steps.forEach((_, i) => {
+      const d = document.createElement('div');
+      d.className = 'step-dot' + (i === stepIdx ? ' active' : '');
+      d.style.background = i === stepIdx ? dotColor : '';
+      wrap.appendChild(d);
+    });
+  }
+
+  function renderStep() {
+    const steps = STEPS[currentIdx];
+    const step = steps[stepIdx];
+    const info = INFO[currentIdx];
+    const c = PALETTE[info.color];
+
+    document.getElementById('step-num-pill').textContent = 'Step ' + (stepIdx + 1) + ' of ' + steps.length;
+    document.getElementById('step-num-pill').style.background = c[50];
+    document.getElementById('step-num-pill').style.color = c[800];
+    document.getElementById('step-title').textContent = step.title;
+    document.getElementById('step-body').textContent = step.body;
+    const formula = step.formulaFn ? step.formulaFn() : step.formula;
+    document.getElementById('step-formula').textContent = formula;
+    document.getElementById('step-math').style.background = c[50];
+    document.getElementById('step-formula').style.color = c[800];
+    document.getElementById('step-math').querySelector('.math-label').style.color = c[600];
+
+    document.getElementById('step-card').style.borderLeftColor = c[400];
+    document.getElementById('prev-btn').disabled = stepIdx === 0;
+    const nextBtn = document.getElementById('next-btn');
+    if (stepIdx === steps.length - 1) {
+      nextBtn.innerHTML = '<i class="ti ti-check"></i>Done';
+      nextBtn.disabled = true;
+    } else {
+      nextBtn.innerHTML = 'Next step<i class="ti ti-chevron-right"></i>';
+      nextBtn.disabled = false;
+    }
+
+    setOps(0);
+    const result = step.action();
+    if (result && typeof result.then === 'function') result.then(() => {});
+    updateStepIndicator();
+  }
+
+  function selectIndex(name) {
+    stopAuto();
+    currentIdx = name;
+    stepIdx = 0;
+    const info = INFO[name];
+    const c = PALETTE[info.color];
+    document.getElementById('method-name').textContent = info.name;
+    document.getElementById('method-name').style.color = c[800];
+    document.getElementById('method-desc').textContent = info.desc;
+    document.getElementById('stat-build').textContent = info.build;
+    document.getElementById('stat-query').textContent = info.query;
+    document.getElementById('stat-memory').textContent = info.memory;
+    document.getElementById('stat-recall').textContent = info.recall;
+    const badge = document.getElementById('method-badge');
+    badge.textContent = c.badge;
+    badge.style.background = c[50];
+    badge.style.color = c[800];
+    document.getElementById('method-header').style.borderLeftColor = c[400];
+
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.idx === name));
+    renderStep();
+  }
+
+  function nextStep() { if (stepIdx < STEPS[currentIdx].length - 1) { stepIdx++; renderStep(); } }
+  function prevStep() { if (stepIdx > 0) { stepIdx--; renderStep(); } }
+
+  function stopAuto() {
+    if (autoplay) {
+      clearInterval(autoplay);
+      autoplay = null;
+      document.getElementById('auto-btn').innerHTML = '<i class="ti ti-player-play"></i>Auto';
+    }
+  }
+  function startAuto() {
+    if (autoplay) return stopAuto();
+    document.getElementById('auto-btn').innerHTML = '<i class="ti ti-player-pause"></i>Pause';
+    autoplay = setInterval(() => {
+      if (stepIdx < STEPS[currentIdx].length - 1) {
+        stepIdx++;
+        renderStep();
+      } else {
+        stopAuto();
+      }
+    }, 2400);
+  }
+
+  // ===== init =====
+  points = generatePoints(N);
+  selectIndex('flat');
+
+  document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => selectIndex(b.dataset.idx)));
+  document.getElementById('next-btn').addEventListener('click', () => { stopAuto(); nextStep(); });
+  document.getElementById('prev-btn').addEventListener('click', () => { stopAuto(); prevStep(); });
+  document.getElementById('auto-btn').addEventListener('click', startAuto);
+
+  const slider = document.getElementById('corpus-slider');
+  const out = document.getElementById('corpus-out');
+  slider.addEventListener('input', () => {
+    N = parseInt(slider.value);
+    out.textContent = N;
+    points = generatePoints(N);
+    renderStep();
+  });
+
+  svg.addEventListener('click', (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) * (W / rect.width);
+    const y = (ev.clientY - rect.top) * (H / rect.height);
+    queryPt = { x: clamp(x, PAD, W - PAD), y: clamp(y, PAD + 20, H - PAD) };
+    stepIdx = 0;
+    renderStep();
+  });
+})();
+</script>
+</body>
+</html>
